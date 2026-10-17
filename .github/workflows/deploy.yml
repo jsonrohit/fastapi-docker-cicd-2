@@ -103,18 +103,18 @@ jobs:
                 sudo docker compose up -d --remove-orphans
 
                 sleep 5
-                sudo docker inspect --format='{{.State.Running}}' fastapi-app | grep -qx true
-                sudo docker inspect --format='{{.State.Running}}' nginx-server | grep -qx true
+                sudo docker inspect --format='{{.State.Running}}' fastapi-app-v2 | grep -qx true
+                sudo docker inspect --format='{{.State.Running}}' nginx-server-v2 | grep -qx true
 
                 echo "=== Running containers (after) ==="
                 sudo docker compose ps
 
-                echo "=== Health check via nginx (port 70) ==="
-                curl -fsS http://localhost:70/ || {
+                echo "=== Health check via nginx (port 7070) ==="
+                curl -fsS http://localhost:7070/ || {
                   echo "--- app logs ---"
-                  sudo docker logs fastapi-app --tail 50
+                  sudo docker logs fastapi-app-v2 --tail 50
                   echo "--- nginx logs ---"
-                  sudo docker logs nginx-server --tail 50
+                  sudo docker logs nginx-server-v2 --tail 50
                   exit 1
                 }
 

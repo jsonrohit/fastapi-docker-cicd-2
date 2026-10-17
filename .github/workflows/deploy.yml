@@ -52,37 +52,73 @@ jobs:
           tags: |
               ${{ secrets.DOCKERHUB_USERNAME }}/fastapi-pratice-v2:latest
               ${{ secrets.DOCKERHUB_USERNAME }}/fastapi-pratice-v2:${{ github.sha }}
-      
-      - name: Deploy to EC2 over SSH
+
+      - name: Copy compose files to EC2
+        uses: appleboy/scp-action@v0.1.7
+        with:
+            host: ${{ secrets.EC2_HOST }}
+            username: ${{ secrets.EC2_USER }}
+            key: ${{ secrets.EC2_SSH_KEY }}
+            source: "docker-compose.yml,nginx.conf"
+            target: "~/fastapi-app-v2/"
+
+      - name: Deploy to EC2 with Docker Compose
         uses: appleboy/ssh-action@v1.2.2
         with:
             host: ${{ secrets.EC2_HOST }}
             username: ${{ secrets.EC2_USER }}
             key: ${{ secrets.EC2_SSH_KEY }}
             script: |
-                set -eu    
-                echo "=== EC2 current dir ==="
-                pwd
+                set -eu
+
+                cd ~/fastapi-app-v2
+
+                # docker compose substitutes ${DOCKERHUB_USERNAME} and ${IMAGE_TAG} from .env
+                printf 'DOCKERHUB_USERNAME=%s\nIMAGE_TAG=%s\n' '${{ secrets.DOCKERHUB_USERNAME }}' '${{ github.sha }}' > .env
+
+                echo "=== Deploy directory ==="
+                ls -la
+
+                if ! sudo docker compose version >/dev/null 2>&1; then
+                  echo "ERROR: Docker Compose plugin is not installed on EC2."
+                  echo "Install it with: sudo apt-get update && sudo apt-get install -y docker-compose-plugin"
+                  exit 1
+                fi
+
+                echo "=== Resolved compose config ==="
+                sudo docker compose config
+
                 echo "=== Docker images on EC2 (before pull) ==="
                 sudo docker images
                 echo "=== Running containers (before) ==="
-                sudo docker ps -a    
-                sudo docker pull ${{ secrets.DOCKERHUB_USERNAME }}/fastapi-pratice-v2:${{ github.sha }}    
-                sudo docker stop fastapi-app || true
-                sudo docker rm fastapi-app || true    
-                sudo docker run -d \
-                    --name fastapi-app \
-                    --restart unless-stopped \
-                    -p 8000:8000 \
-                    ${{ secrets.DOCKERHUB_USERNAME }}/fastapi-pratice-v2:${{ github.sha }}    
+                sudo docker ps -a
+
+                # Remove leftover containers from previous 'docker run' deploys
+                sudo docker rm -f fastapi-app nginx-server 2>/dev/null || true
+
+                echo "=== Pulling images ==="
+                sudo docker compose pull
+
+                echo "=== Starting services ==="
+                sudo docker compose up -d --remove-orphans
+
                 sleep 5
                 sudo docker inspect --format='{{.State.Running}}' fastapi-app | grep -qx true
+                sudo docker inspect --format='{{.State.Running}}' nginx-server | grep -qx true
+
                 echo "=== Running containers (after) ==="
-                sudo docker ps
-                echo "=== App files inside container ==="
-                sudo docker exec fastapi-app ls -la /app
-                echo "=== Physical location of image files on EC2 disk ==="
-                IMAGE_ID=$(sudo docker inspect --format '{{.Image}}' fastapi-app)
-                sudo docker inspect "$IMAGE_ID" --format 'UpperDir: {{index .GraphDriver.Data "UpperDir"}}' || \
-                    echo "Storage driver: $(sudo docker info --format '{{.Driver}}') — image stored under /var/lib/docker/"
+                sudo docker compose ps
+
+                echo "=== Health check via nginx (port 70) ==="
+                curl -fsS http://localhost:70/ || {
+                  echo "--- app logs ---"
+                  sudo docker logs fastapi-app --tail 50
+                  echo "--- nginx logs ---"
+                  sudo docker logs nginx-server --tail 50
+                  exit 1
+                }
+
+                echo "=== Pruning dangling images ==="
+                sudo docker image prune -f
+
                 echo "Deployment successful"

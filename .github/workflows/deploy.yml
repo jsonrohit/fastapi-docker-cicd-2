@@ -93,9 +93,6 @@ jobs:
                 echo "=== Running containers (before) ==="
                 sudo docker ps -a
 
-                # Remove leftover containers from previous 'docker run' deploys
-                sudo docker rm -f fastapi-app nginx-server 2>/dev/null || true
-
                 echo "=== Pulling images ==="
                 sudo docker compose pull
 
